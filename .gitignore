@@ -1,0 +1,13 @@
+/.gradle
+/build
+**/build
+/.idea
+/.vscode
+/.DS_Store
+/out
+**/bin
+.DS_Store
+
+near-jsonrpc-types/src/test
+near-jsonrpc-types/src/main/kotlin/io/near/jsonrpc/types/NearModels.kt
+near-jsonrpc-client/src/main/kotlin/io/near/jsonrpc/client/NearJsonRpcApi.kt
