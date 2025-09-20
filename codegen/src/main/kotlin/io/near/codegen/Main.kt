@@ -68,6 +68,12 @@ fun mapType(schemaEl: JsonElement, typesPkg: String): TypeName {
         if (ref != null) return ClassName(typesPkg, pascalCase(ref.substringAfterLast("/")))
         val type = schemaEl["type"]?.jsonPrimitive?.contentOrNull
         val format = schemaEl["format"]?.jsonPrimitive?.contentOrNull
+        val enumVals = schemaEl["enum"] as? JsonArray
+
+        if (enumVals != null && enumVals.isNotEmpty()) {
+            return ClassName(typesPkg, pascalCase(schemaEl["title"]?.jsonPrimitive?.contentOrNull ?: "UnknownEnum"))
+        }
+
         when (type) {
             "string" -> {
                 if (format != null && (format.contains("int") || format.contains("uint") || format.contains("u128") || format.contains("int128"))) {
@@ -88,7 +94,18 @@ fun mapType(schemaEl: JsonElement, typesPkg: String): TypeName {
                 val itemType = if (items != null) mapType(items, typesPkg) else STRING
                 return LIST.parameterizedBy(itemType)
             }
-            "object" -> return ClassName("kotlinx.serialization.json", "JsonObject")
+            "object" -> {
+                val props = schemaEl["properties"] as? JsonObject
+                if (props != null) {
+                    for ((_, prop) in props) {
+                        val propEnum = prop.jsonObject["enum"] as? JsonArray
+                        if (propEnum != null && propEnum.isNotEmpty()) {
+                            return ClassName(typesPkg, pascalCase(schemaEl["title"]?.jsonPrimitive?.contentOrNull ?: "UnknownEnum"))
+                        }
+                    }
+                }
+                return ClassName("kotlinx.serialization.json", "JsonObject")
+            }
         }
     }
     return STRING
@@ -164,7 +181,6 @@ fun formatWithSpotless() {
     }
 }
 
-
 fun main(args: Array<String>) {
     val specUrl = if (args.isNotEmpty()) args[0] else "https://raw.githubusercontent.com/near/nearcore/master/chain/jsonrpc/openapi/openapi.json"
     println("Fetching OpenAPI spec from: $specUrl")
@@ -207,6 +223,28 @@ fun main(args: Array<String>) {
         try {
             val className = pascalCase(name)
             val obj = el.jsonObject
+            val enumVals = obj["enum"] as? JsonArray
+            if (enumVals != null && enumVals.isNotEmpty()) {
+                val enumTypeSpec = TypeSpec.enumBuilder(className)
+                    .addModifiers(KModifier.PUBLIC)
+                    .addAnnotation(ClassName("kotlinx.serialization", "Serializable"))
+                enumVals.forEach { enumValue ->
+                    if (enumValue is JsonPrimitive) {
+                        val enumValueStr = enumValue.content
+                        enumTypeSpec.addEnumConstant(
+                            enumValueStr.uppercase(Locale.getDefault()),
+                            TypeSpec.anonymousClassBuilder()
+                                .addAnnotation(
+                                    AnnotationSpec.builder(ClassName("kotlinx.serialization", "SerialName"))
+                                        .addMember("%S", enumValueStr)
+                                        .build()
+                                )
+                                .build()
+                        )
+                    }
+                }
+                modelsFile.addType(enumTypeSpec.build())
+            }
             val hasOneOf = obj["oneOf"] != null
             val hasDiscriminator = obj["discriminator"] != null
             if (hasOneOf || hasDiscriminator) {
