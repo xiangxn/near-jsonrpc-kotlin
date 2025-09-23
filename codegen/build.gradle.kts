@@ -12,4 +12,4 @@ dependencies {
     testImplementation(kotlin("test"))
     testImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
 }
-application { mainClass.set("io.near.codegen.MainKt") }
+application { mainClass.set("io.near.codegen.Main") }
