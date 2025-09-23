@@ -9,5 +9,7 @@
 .DS_Store
 
 near-jsonrpc-types/src/test
-near-jsonrpc-types/src/main/kotlin/io/near/jsonrpc/types/NearModels.kt
-near-jsonrpc-client/src/main/kotlin/io/near/jsonrpc/client/NearJsonRpcApi.kt
+near-jsonrpc-types/src/main/kotlin/io/near/jsonrpc/types/*
+near-jsonrpc-client/src/main/kotlin/io/near/jsonrpc/client/*
+!near-jsonrpc-types/src/main/kotlin/io/near/jsonrpc/client/JsonRpcClient.kt
+

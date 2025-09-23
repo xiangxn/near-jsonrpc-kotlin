@@ -1,0 +1,25 @@
+package {{package}};
+
+import kotlinx.serialization.Serializable;
+import java.math.BigInteger;
+import io.near.jsonrpc.serializer.BigIntegerSerializer;
+import io.near.jsonrpc.serializer.ULongSerializer;
+
+{{#models}}
+{{#model}}
+@Serializable
+data class {{classname}}(
+    {{#vars}}
+    {{#datatype}}
+    {{#isBigInteger}}
+    @Serializable(with = BigIntegerSerializer::class)
+    {{/isBigInteger}}
+    {{#isULong}}
+    @Serializable(with = ULongSerializer::class)
+    {{/isULong}}
+    val {{name}}: {{datatype}}{{^required}}? = null{{/required}}{{#hasMore}},{{/hasMore}}
+    {{/datatype}}
+    {{/vars}}
+)
+{{/model}}
+{{/models}}
