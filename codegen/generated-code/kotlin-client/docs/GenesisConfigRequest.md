@@ -1,0 +1,8 @@
+
+# GenesisConfigRequest
+
+## Enum
+
+
+
+

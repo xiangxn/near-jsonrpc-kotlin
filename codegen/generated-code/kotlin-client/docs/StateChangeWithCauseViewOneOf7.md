@@ -1,0 +1,18 @@
+
+# StateChangeWithCauseViewOneOf7
+
+## Properties
+| Name | Type | Description | Notes |
+| ------------ | ------------- | ------------- | ------------- |
+| **change** | [**StateChangeWithCauseViewOneOf7Change**](StateChangeWithCauseViewOneOf7Change.md) |  |  |
+| **type** | [**inline**](#Type) |  |  |
+
+
+<a id="Type"></a>
+## Enum: type
+| Name | Value |
+| ---- | ----- |
+| type | data_update |
+
+
+

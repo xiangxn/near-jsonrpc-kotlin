@@ -2,6 +2,7 @@ package io.near.codegen
 
 import com.squareup.kotlinpoet.*
 import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
+import io.swagger.v3.oas.models.media.Schema
 import kotlinx.serialization.json.*
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -9,8 +10,11 @@ import java.io.File
 import java.math.BigInteger
 import org.jetbrains.annotations.Nullable
 import org.openapitools.codegen.DefaultGenerator
+import org.openapitools.codegen.languages.KotlinClientCodegen
 import org.openapitools.codegen.config.CodegenConfigurator
-
+import org.openapitools.codegen.model.ModelsMap
+import org.openapitools.codegen.CodegenModel
+import org.openapitools.codegen.CodegenProperty
 
 
 /**
@@ -92,14 +96,56 @@ object OpenApiParser {
     }
 }
 
+class NearClientCodegen : KotlinClientCodegen() {
+    
+    override fun getName(): String = "near-kotlin"
+
+    override fun fromProperty(name: String?, schema: Schema<*>, required: Boolean, schemaIsFromAdditionalProperties: Boolean): CodegenProperty {
+        val prop = super.fromProperty(name, schema, required, schemaIsFromAdditionalProperties)
+        // if(prop.dataFormat == "uint128"){
+        //     println("DEBUG: ${prop.name} is uint128, dataType: ${prop.dataType} ${schema.format}")
+        // }
+        when (schema.format) {
+            "uint128", "int128" -> {
+                // println("DEBUG: ${prop.name} is uint128, dataType: ${prop.dataType}")
+                prop.datatype = "BigInteger"
+                prop.baseType = "BigInteger"
+                prop.datatypeWithEnum = "BigInteger"
+                prop.vendorExtensions["x-is-biginteger"] = true
+                importMapping()["BigInteger"] = "java.math.BigInteger"
+            }
+            "uint64" -> {
+                prop.datatype = "ULong"
+                prop.baseType = "ULong"
+                prop.datatypeWithEnum = "ULong"
+                prop.vendorExtensions["x-is-ulong"] = true
+                importMapping()["ULong"] = "kotlin.ULong"
+            }
+            "uint32", "uint16", "uint8" -> {
+                prop.datatype = "UInt"
+                prop.baseType = "UInt"
+                prop.datatypeWithEnum = "UInt"
+                prop.vendorExtensions["x-is-uint"] = true
+                importMapping()["UInt"] = "kotlin.UInt"
+            }
+        }
+        return prop
+    }
+}
+
+
 /** 类型生成器 */
 class TypeGenerator {
     fun generateModels(specUrl: String) {
+        val targetDir = File("../near-jsonrpc-types/src/main/kotlin/io/near/jsonrpc/types")
+        targetDir.deleteRecursively()
+        
+
         val tempDir = File("build/tmp/openapi-gen")
         tempDir.mkdirs()
 
         val configurator = CodegenConfigurator().apply {
-            setGeneratorName("kotlin")
+            setGeneratorName("near-kotlin")
             setInputSpec(specUrl)
             setOutputDir(tempDir.absolutePath)
             setApiPackage("io.near.jsonrpc.client")
@@ -107,18 +153,19 @@ class TypeGenerator {
 
             // 类型映射
             setTypeMappings(mapOf(
-                "int128" to "java.math.BigInteger",
-                "uint128" to "java.math.BigInteger",
-                "uint64" to "kotlin.ULong",
-                "int64" to "kotlin.ULong",
-                )
-            )
-            setImportMappings(
-                mapOf(
-                    "BigInteger" to "java.math.BigInteger",
-                    "ULong" to "kotlin.ULong"
-                )
-            )
+                "integer" to "kotlin.Int"
+            ))
+
+            setImportMappings(mapOf(
+                "BigInteger" to "java.math.BigInteger",
+                "ULong" to "kotlin.ULong",
+                "UInt" to "kotlin.UInt",
+                "BigIntegerSerializer" to "io.near.jsonrpc.serializer.BigIntegerSerializer",
+                "ULongSerializer" to "io.near.jsonrpc.serializer.ULongSerializer",
+                "ULongListSerializer" to "io.near.jsonrpc.serializer.ULongListSerializer",
+                "UIntSerializer" to "io.near.jsonrpc.serializer.UIntSerializer",
+                "UIntListSerializer" to "io.near.jsonrpc.serializer.UIntListSerializer"
+            ))
 
             // 只生成 models
             setAdditionalProperties(
@@ -134,15 +181,41 @@ class TypeGenerator {
             setValidateSpec(false)
         }
 
+
+        
         val generator = DefaultGenerator()
         generator.opts(configurator.toClientOptInput())
         generator.generate()
 
         val generatedModels = File(tempDir, "src/main/kotlin/io/near/jsonrpc/types")
-        val targetDir = File("../near-jsonrpc-types/src/main/kotlin/io/near/jsonrpc/types")
+        replaceEmptyEnums(generatedModels, listOf(
+            "GenesisConfigRequest",
+            "RpcClientConfigRequest",
+            "RpcHealthRequest",
+            "RpcHealthResponse",
+            "RpcNetworkInfoRequest",
+            "RpcStatusRequest"
+        ))
         generatedModels.copyRecursively(targetDir, overwrite = true)
         tempDir.deleteRecursively()
     }
+
+    private fun replaceEmptyEnums(generatedModels: File, emptyEnumFiles: List<String>) {
+        generatedModels.walkTopDown()
+            .filter { it.isFile && it.nameWithoutExtension in emptyEnumFiles }
+            .forEach { file ->
+                val className = file.nameWithoutExtension
+                file.writeText(
+                    """
+                    package io.near.jsonrpc.types
+
+                    typealias $className = String?
+                    """.trimIndent(),
+                    Charsets.UTF_8
+                )
+            }
+    }
+
 }
 
 /** API 客户端生成器 */
