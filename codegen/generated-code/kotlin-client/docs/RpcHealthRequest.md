@@ -1,8 +1,0 @@
-
-# RpcHealthRequest
-
-## Enum
-
-
-
-
