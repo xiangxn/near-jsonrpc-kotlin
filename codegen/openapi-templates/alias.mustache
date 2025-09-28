@@ -1,0 +1,15 @@
+{{>licenseInfo}}
+package {{modelPackage}}
+
+{{#imports}}import {{import}}
+{{/imports}}
+
+{{#models}}
+{{#model}}
+{{^isModel}}
+{{#isAlias}}
+typealias {{classname}} = {{{dataType}}}
+{{/isAlias}}
+{{/isModel}}
+{{/model}}
+{{/models}}

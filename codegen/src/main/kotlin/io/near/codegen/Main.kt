@@ -6,6 +6,7 @@ import io.swagger.v3.oas.models.media.Schema
 import kotlinx.serialization.json.*
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.checkerframework.checker.units.qual.m
 import java.io.File
 import java.math.BigInteger
 import org.jetbrains.annotations.Nullable
@@ -13,8 +14,10 @@ import org.openapitools.codegen.DefaultGenerator
 import org.openapitools.codegen.languages.KotlinClientCodegen
 import org.openapitools.codegen.config.CodegenConfigurator
 import org.openapitools.codegen.model.ModelsMap
+import org.openapitools.codegen.model.ModelMap
 import org.openapitools.codegen.CodegenModel
 import org.openapitools.codegen.CodegenProperty
+import org.openapitools.codegen.CodegenConstants
 
 
 /**
@@ -100,11 +103,35 @@ class NearClientCodegen : KotlinClientCodegen() {
     
     override fun getName(): String = "near-kotlin"
 
+    override fun fromModel(name: String, schema: Schema<Any>): CodegenModel {
+        val model = super.fromModel(name, schema)
+
+        when (name) {
+            "NearGas" -> {
+                model.isAlias = true
+                model.dataType = "ULong"
+                model.vendorExtensions["x-is-ulong"] = true
+                model.imports.add("kotlin.ULong")
+            }
+            "MutableConfigValue" -> {
+                model.isAlias = true
+                model.dataType = "kotlin.String"
+            }
+        }
+
+        return model
+    }
+
     override fun fromProperty(name: String?, schema: Schema<*>, required: Boolean, schemaIsFromAdditionalProperties: Boolean): CodegenProperty {
         val prop = super.fromProperty(name, schema, required, schemaIsFromAdditionalProperties)
-        // if(prop.dataFormat == "uint128"){
-        //     println("DEBUG: ${prop.name} is uint128, dataType: ${prop.dataType} ${schema.format}")
-        // }
+
+        if (schema.allOf != null && schema.allOf.isNotEmpty() && schema.format == null) {
+            schema.allOf.forEach { subSchema ->
+                if(subSchema.type == null && subSchema.format == null && subSchema.`$ref` != null && subSchema.`$ref`.contains("NearGas")){
+                    schema.format = "uint64"
+                }
+            }
+        }
         when (schema.format) {
             "uint128", "int128" -> {
                 // println("DEBUG: ${prop.name} is uint128, dataType: ${prop.dataType}")
@@ -150,6 +177,7 @@ class TypeGenerator {
             setOutputDir(tempDir.absolutePath)
             setApiPackage("io.near.jsonrpc.client")
             setModelPackage("io.near.jsonrpc.types")
+            setTemplateDir("openapi-templates")
 
             // 类型映射
             setTypeMappings(mapOf(
@@ -173,18 +201,17 @@ class TypeGenerator {
                     "generateModels" to true,
                     "generateApis" to false,
                     "generateSupportingFiles" to false,
-                    "serializationLibrary" to "kotlinx_serialization"
+                    "serializationLibrary" to "kotlinx_serialization",
                 )
             )
-
-            setTemplateDir("openapi-templates")
             setValidateSpec(false)
         }
 
 
         
         val generator = DefaultGenerator()
-        generator.opts(configurator.toClientOptInput())
+        val input = configurator.toClientOptInput()
+        generator.opts(input)
         generator.generate()
 
         val generatedModels = File(tempDir, "src/main/kotlin/io/near/jsonrpc/types")
@@ -311,7 +338,7 @@ class TestGenerator {
 
         schemas.forEach { (name, schema) ->
             try {
-                generateTest(name, schema.jsonObject, testDir)
+                generateTest(name, schema.jsonObject, schemas, testDir)
             } catch (e: Exception) {
                 System.err.println("Error generating test for $name: ${e.message}")
             }
@@ -321,6 +348,7 @@ class TestGenerator {
     private fun generateTest(
         schemaName: String,
         schema: JsonObject,
+        schemas: JsonObject,
         testDir: File
     ) {
         val className = StringUtils.pascalCase(schemaName) + "Test"
@@ -346,7 +374,7 @@ class TestGenerator {
             )
 
         // 生成序列化测试
-        generateSerializationTest(schemaName, schema, testClass)
+        generateSerializationTest(schemaName, schema, schemas, testClass)
         // 生成反序列化测试
         generateDeserializationTest(schemaName, schema, testClass)
         // 生成验证测试
@@ -359,11 +387,12 @@ class TestGenerator {
     private fun generateSerializationTest(
         schemaName: String,
         schema: JsonObject,
+        schemas: JsonObject,
         testClass: TypeSpec.Builder
     ) {
         val testName = "test" + StringUtils.pascalCase(schemaName) + "Serialization"
         val modelClass = ClassName(Main.TYPES_PKG, StringUtils.pascalCase(schemaName))
-        val constructorParams = generateConstructorParams(schema)
+        val constructorParams = generateConstructorParams(schema, schemas)
 
         val testMethod = FunSpec.builder(testName)
             .addAnnotation(ClassName("org.junit.jupiter.api", "Test"))
@@ -376,18 +405,50 @@ class TestGenerator {
         testClass.addFunction(testMethod)
     }
 
-    private fun generateConstructorParams(schema: JsonObject): String {
+    private fun generateConstructorParams(schema: JsonObject, schemas: JsonObject): String {
         val properties = schema["properties"]?.jsonObject ?: JsonObject(emptyMap())
         val requiredSet = schema["required"]?.jsonArray?.map { it.jsonPrimitive.content }?.toSet() ?: emptySet()
-
-        return properties.entries.joinToString(", ") { (propName, propSchema) ->
-            val propType = when (propSchema.jsonObject["type"]?.jsonPrimitive?.content) {
+        val requiredProps = properties.entries.filter { (propName, _) -> requiredSet.contains(propName) }
+        // 5. 生成参数名和默认值
+        return requiredProps.joinToString(", ") { (propName, propSchema) ->
+            val pType = propSchema.jsonObject["type"]?.jsonPrimitive?.content ?: if (propSchema.jsonObject["allOf"] != null) "allOf" else null
+            val propValue = when (pType) {
                 "string" -> "\"mock_$propName\""
                 "integer" -> "1"
                 "boolean" -> "true"
+                "allOf" -> {
+                    val refSchema = propSchema.jsonObject["allOf"]?.jsonArray?.first()?.jsonObject ?: JsonObject(emptyMap())
+                    val ref = refSchema.jsonObject["\$ref"]?.jsonPrimitive?.content
+                    if(ref != null){
+                        val refName = ref.substringAfterLast("/")
+                        val subSchema = schemas[refName]?.jsonObject ?: JsonObject(emptyMap())
+                        if(subSchema["properties"] != null) {
+                            val constructorParams = generateConstructorParams(subSchema, schemas)
+                            "${StringUtils.pascalCase(refName)}($constructorParams)"
+                        } else if(subSchema["minimum"] != null) {
+                            "${subSchema["minimum"]}"
+                        } else if(subSchema["type"] == "string") {
+                            "\"mock_$propName\""
+                        } else {
+                            "null"
+                        }
+                    } else {
+                        "null"
+                    }
+                }
+                "object" -> {
+                    val ref = propSchema.jsonObject["\$ref"]?.jsonPrimitive?.content
+                    if(ref != null){
+                        val subSchema = schemas[ref.substringAfterLast("/")]?.jsonObject ?: JsonObject(emptyMap())
+                        val constructorParams = generateConstructorParams(subSchema, schemas)
+                        "${StringUtils.pascalCase(propName)}($constructorParams)"
+                    } else {
+                        "null"
+                    }
+                }
                 else -> "null"
             }
-            "$propName = $propType"
+            "${StringUtils.camelCase(propName)} = $propValue"
         }
     }
 
